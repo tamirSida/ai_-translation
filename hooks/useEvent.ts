@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { TranslationEvent, TranscriptionChunk } from '@/types';
@@ -66,11 +66,12 @@ export function useEvent(eventId: string | null) {
   return { event, loading, error, updateStatus, updateGlossary };
 }
 
-export function useChunks(eventId: string | null) {
+export function useChunks(eventId: string | null, isLive: boolean = false) {
   const [chunks, setChunks] = useState<TranscriptionChunk[]>([]);
   const [loading, setLoading] = useState(true);
+  const lastIndexRef = useRef(-1);
 
-  // Poll for new chunks every 2 seconds
+  // Fetch chunks once on mount, then poll only when live
   useEffect(() => {
     if (!eventId) {
       setLoading(false);
@@ -79,12 +80,12 @@ export function useChunks(eventId: string | null) {
 
     const fetchChunks = async () => {
       try {
-        const lastIndex = chunks.length > 0 ? chunks[chunks.length - 1].chunkIndex : -1;
-        const res = await fetch(`/api/events/${eventId}/chunks?after=${lastIndex}`);
+        const res = await fetch(`/api/events/${eventId}/chunks?after=${lastIndexRef.current}`);
         const data = await res.json();
 
         if (data.success && data.data.length > 0) {
           setChunks(prev => [...prev, ...data.data]);
+          lastIndexRef.current = data.data[data.data.length - 1].chunkIndex;
         }
       } catch (err) {
         console.error('Failed to fetch chunks:', err);
@@ -93,11 +94,23 @@ export function useChunks(eventId: string | null) {
       }
     };
 
+    // Always fetch once to load existing chunks
     fetchChunks();
+
+    // Only poll if live
+    if (!isLive) {
+      console.log('[useChunks] Not live - polling disabled');
+      return;
+    }
+
+    console.log('[useChunks] Live - polling enabled');
     const interval = setInterval(fetchChunks, 2000);
 
-    return () => clearInterval(interval);
-  }, [eventId, chunks.length]);
+    return () => {
+      console.log('[useChunks] Polling stopped');
+      clearInterval(interval);
+    };
+  }, [eventId, isLive]);
 
   return { chunks, loading };
 }

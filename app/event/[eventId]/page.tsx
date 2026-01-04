@@ -10,7 +10,7 @@ export default function EventPage({ params }: { params: Promise<{ eventId: strin
   const { eventId } = use(params);
   const { user, loading: authLoading } = useAuth();
   const { event, loading: eventLoading, updateStatus, updateGlossary } = useEvent(eventId);
-  const { chunks } = useChunks(eventId);
+  const { chunks } = useChunks(eventId, event?.status === 'live');
   const router = useRouter();
 
   const [glossaryInput, setGlossaryInput] = useState('');

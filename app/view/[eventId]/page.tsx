@@ -6,7 +6,7 @@ import { useEvent, useChunks } from '@/hooks/useEvent';
 export default function ViewerPage({ params }: { params: Promise<{ eventId: string }> }) {
   const { eventId } = use(params);
   const { event, loading: eventLoading } = useEvent(eventId);
-  const { chunks, loading: chunksLoading } = useChunks(eventId);
+  const { chunks, loading: chunksLoading } = useChunks(eventId, event?.status === 'live');
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new chunks arrive
