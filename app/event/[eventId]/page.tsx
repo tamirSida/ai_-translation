@@ -15,6 +15,7 @@ export default function EventPage({ params }: { params: Promise<{ eventId: strin
 
   const [glossaryInput, setGlossaryInput] = useState('');
   const [showGlossaryModal, setShowGlossaryModal] = useState(false);
+  const [chunkDuration, setChunkDuration] = useState(5); // seconds
 
   if (authLoading || eventLoading) {
     return (
@@ -160,10 +161,31 @@ export default function EventPage({ params }: { params: Promise<{ eventId: strin
         {/* Audio Recorder */}
         <div className="bg-white p-6 rounded-lg shadow-sm mb-6">
           <h2 className="text-lg font-semibold mb-4">Audio Recorder</h2>
+
+          {/* Chunk Duration Control */}
+          <div className="mb-4 flex items-center gap-4">
+            <label className="text-sm text-gray-600">Chunk Duration:</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min="3"
+                max="15"
+                value={chunkDuration}
+                onChange={(e) => setChunkDuration(Number(e.target.value))}
+                disabled={event.status === 'live'}
+                className="w-32"
+              />
+              <span className="text-sm font-medium w-12">{chunkDuration}s</span>
+            </div>
+            {event.status === 'live' && (
+              <span className="text-xs text-gray-400">(locked during live)</span>
+            )}
+          </div>
+
           <AudioRecorder
             eventId={eventId}
             isLive={event.status === 'live'}
-            chunkDurationMs={5000}
+            chunkDurationMs={chunkDuration * 1000}
             onChunkSent={(index) => console.log(`Chunk ${index} sent`)}
             onError={(error) => console.error('Recorder error:', error)}
           />

@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 
 if (!process.env.OPENAI_API_KEY) {
   throw new Error('Missing OPENAI_API_KEY environment variable');
@@ -13,8 +13,17 @@ export const openai = new OpenAI({
  * Supports: mp3, wav, m4a, webm, ogg
  */
 export async function transcribeHebrew(audioFile: File): Promise<string> {
+  // Convert File to a format OpenAI SDK can handle
+  const arrayBuffer = await audioFile.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  // Create a file object that OpenAI SDK can process
+  const file = await toFile(buffer, audioFile.name || 'audio.webm', {
+    type: audioFile.type || 'audio/webm',
+  });
+
   const transcription = await openai.audio.transcriptions.create({
-    file: audioFile,
+    file: file,
     model: 'whisper-1',
     language: 'he',
     response_format: 'text',

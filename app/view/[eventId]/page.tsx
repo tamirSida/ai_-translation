@@ -12,7 +12,10 @@ export default function ViewerPage({ params }: { params: Promise<{ eventId: stri
   // Auto-scroll to bottom when new chunks arrive
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      scrollRef.current.scrollTo({
+        top: scrollRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
     }
   }, [chunks.length]);
 
@@ -71,8 +74,10 @@ export default function ViewerPage({ params }: { params: Promise<{ eventId: stri
             {chunks.map((chunk, index) => (
               <div
                 key={chunk.id}
-                className={`transition-opacity duration-500 ${
-                  index === chunks.length - 1 ? 'opacity-100' : 'opacity-70'
+                className={`transition-all duration-500 ${
+                  index === chunks.length - 1
+                    ? 'opacity-100 scale-100'
+                    : 'opacity-60 scale-[0.98]'
                 }`}
               >
                 <p className="text-3xl md:text-4xl leading-relaxed">
@@ -80,6 +85,8 @@ export default function ViewerPage({ params }: { params: Promise<{ eventId: stri
                 </p>
               </div>
             ))}
+            {/* Scroll anchor */}
+            <div className="h-4" />
           </div>
         )}
 

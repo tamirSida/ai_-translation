@@ -5,7 +5,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 interface AudioRecorderProps {
   eventId: string;
   isLive: boolean;
-  chunkDurationMs?: number; // Default 5000ms (5 seconds)
+  chunkDurationMs?: number;
   onChunkSent?: (chunkIndex: number) => void;
   onError?: (error: string) => void;
 }
@@ -21,18 +21,23 @@ export function AudioRecorder({
   const [chunkIndex, setChunkIndex] = useState(0);
   const [status, setStatus] = useState<string>('Ready');
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const startTimeRef = useRef<number>(0);
-  const chunkStartTimeRef = useRef<number>(0);
+  const streamRef = useRef<MediaStream | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunkIndexRef = useRef(0);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isRecordingRef = useRef(false);
 
-  const sendChunk = useCallback(async (audioBlob: Blob, index: number, start: number, end: number) => {
+  const sendChunk = useCallback(async (audioBlob: Blob, index: number) => {
+    if (audioBlob.size < 1000) {
+      return; // Skip tiny chunks
+    }
+
     const formData = new FormData();
     formData.append('audio', audioBlob, `chunk_${index}.webm`);
     formData.append('eventId', eventId);
     formData.append('chunkIndex', index.toString());
-    formData.append('startTime', start.toString());
-    formData.append('endTime', end.toString());
+    formData.append('startTime', (index * chunkDurationMs).toString());
+    formData.append('endTime', ((index + 1) * chunkDurationMs).toString());
 
     try {
       setStatus(`Sending chunk ${index}...`);
@@ -41,8 +46,9 @@ export function AudioRecorder({
         body: formData,
       });
 
+      const data = await res.json();
+
       if (!res.ok) {
-        const data = await res.json();
         throw new Error(data.error || 'Failed to process chunk');
       }
 
@@ -53,86 +59,105 @@ export function AudioRecorder({
       setStatus(`Error: ${message}`);
       onError?.(message);
     }
-  }, [eventId, onChunkSent, onError]);
+  }, [eventId, chunkDurationMs, onChunkSent, onError]);
+
+  // Record a single chunk and send it
+  const recordAndSendChunk = useCallback(async () => {
+    if (!streamRef.current || !isRecordingRef.current) return;
+
+    const currentIndex = chunkIndexRef.current;
+    chunkIndexRef.current += 1;
+    setChunkIndex(chunkIndexRef.current);
+
+    return new Promise<void>((resolve) => {
+      const chunks: Blob[] = [];
+
+      const recorder = new MediaRecorder(streamRef.current!, {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : 'audio/webm',
+      });
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        if (chunks.length > 0) {
+          const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+          sendChunk(audioBlob, currentIndex);
+        }
+        resolve();
+      };
+
+      recorder.start();
+      recorderRef.current = recorder;
+
+      // Stop after chunk duration
+      setTimeout(() => {
+        if (recorder.state === 'recording') {
+          recorder.stop();
+        }
+      }, chunkDurationMs);
+    });
+  }, [chunkDurationMs, sendChunk]);
 
   const startRecording = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus',
+      setStatus('Requesting microphone...');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+        }
       });
 
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
-      startTimeRef.current = Date.now();
-      chunkStartTimeRef.current = Date.now();
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = () => {
-        // Send final chunk if any data
-        if (chunksRef.current.length > 0) {
-          const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-          const endTime = Date.now() - startTimeRef.current;
-          const startTime = chunkStartTimeRef.current - startTimeRef.current;
-          sendChunk(audioBlob, chunkIndex, startTime, endTime);
-        }
-      };
-
-      mediaRecorder.start();
+      streamRef.current = stream;
+      isRecordingRef.current = true;
+      chunkIndexRef.current = 0;
+      setChunkIndex(0);
       setIsRecording(true);
       setStatus('Recording...');
+
+      // Start first chunk immediately
+      recordAndSendChunk();
+
+      // Schedule subsequent chunks
+      intervalRef.current = setInterval(() => {
+        if (isRecordingRef.current) {
+          recordAndSendChunk();
+        }
+      }, chunkDurationMs);
+
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to start recording';
       setStatus(`Error: ${message}`);
       onError?.(message);
     }
-  }, [chunkIndex, sendChunk, onError]);
+  }, [chunkDurationMs, recordAndSendChunk, onError]);
 
   const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-      setIsRecording(false);
-      setStatus('Stopped');
+    isRecordingRef.current = false;
+
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
+
+    if (recorderRef.current && recorderRef.current.state === 'recording') {
+      recorderRef.current.stop();
+    }
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+
+    setIsRecording(false);
+    setStatus('Stopped');
   }, []);
-
-  // Handle chunk intervals
-  useEffect(() => {
-    if (!isRecording || !mediaRecorderRef.current) return;
-
-    const interval = setInterval(() => {
-      const mediaRecorder = mediaRecorderRef.current;
-      if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
-
-      // Stop to trigger ondataavailable, then restart
-      mediaRecorder.stop();
-
-      const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-      const endTime = Date.now() - startTimeRef.current;
-      const startTime = chunkStartTimeRef.current - startTimeRef.current;
-
-      if (audioBlob.size > 0) {
-        sendChunk(audioBlob, chunkIndex, startTime, endTime);
-        setChunkIndex(prev => prev + 1);
-      }
-
-      // Reset for next chunk
-      chunksRef.current = [];
-      chunkStartTimeRef.current = Date.now();
-
-      // Restart recording
-      mediaRecorder.start();
-    }, chunkDurationMs);
-
-    return () => clearInterval(interval);
-  }, [isRecording, chunkIndex, chunkDurationMs, sendChunk]);
 
   // Auto-start/stop based on live status
   useEffect(() => {
@@ -142,6 +167,19 @@ export function AudioRecorder({
       stopRecording();
     }
   }, [isLive, isRecording, startRecording, stopRecording]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      isRecordingRef.current = false;
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
 
   return (
     <div className="p-4 border rounded-lg bg-gray-50">
