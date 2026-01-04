@@ -64,7 +64,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ProcessCh
     if (!hebrewText.trim() || !englishText.trim()) {
       return NextResponse.json({
         success: true,
-        data: null, // No data saved for empty chunks
+        data: undefined, // No data saved for empty chunks
       });
     }
 
