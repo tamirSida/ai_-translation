@@ -26,8 +26,14 @@ export function AudioRecorder({
   const chunkIndexRef = useRef(0);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const isRecordingRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const sendChunk = useCallback(async (audioBlob: Blob, index: number) => {
+    // Don't send if we've stopped recording
+    if (!isRecordingRef.current) {
+      return;
+    }
+
     if (audioBlob.size < 1000) {
       return; // Skip tiny chunks
     }
@@ -44,6 +50,7 @@ export function AudioRecorder({
       const res = await fetch('/api/transcribe', {
         method: 'POST',
         body: formData,
+        signal: abortControllerRef.current?.signal,
       });
 
       const data = await res.json();
@@ -55,6 +62,10 @@ export function AudioRecorder({
       setStatus(`Chunk ${index} sent`);
       onChunkSent?.(index);
     } catch (err) {
+      // Ignore abort errors
+      if (err instanceof Error && err.name === 'AbortError') {
+        return;
+      }
       const message = err instanceof Error ? err.message : 'Unknown error';
       setStatus(`Error: ${message}`);
       onError?.(message);
@@ -106,6 +117,7 @@ export function AudioRecorder({
 
   const startRecording = useCallback(async () => {
     try {
+      console.log('[AudioRecorder] Starting recording...');
       setStatus('Requesting microphone...');
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -116,10 +128,12 @@ export function AudioRecorder({
 
       streamRef.current = stream;
       isRecordingRef.current = true;
+      abortControllerRef.current = new AbortController();
       chunkIndexRef.current = 0;
       setChunkIndex(0);
       setIsRecording(true);
       setStatus('Recording...');
+      console.log(`[AudioRecorder] ✓ Recording started (chunk duration: ${chunkDurationMs}ms)`);
 
       // Start first chunk immediately
       recordAndSendChunk();
@@ -133,30 +147,43 @@ export function AudioRecorder({
 
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to start recording';
+      console.error('[AudioRecorder] Failed to start:', message);
       setStatus(`Error: ${message}`);
       onError?.(message);
     }
   }, [chunkDurationMs, recordAndSendChunk, onError]);
 
   const stopRecording = useCallback(() => {
+    console.log('[AudioRecorder] Stopping recording...');
     isRecordingRef.current = false;
 
+    // Abort any in-flight requests
+    if (abortControllerRef.current) {
+      console.log('[AudioRecorder] Aborting in-flight API requests');
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
     if (intervalRef.current) {
+      console.log('[AudioRecorder] Clearing chunk interval');
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
 
     if (recorderRef.current && recorderRef.current.state === 'recording') {
+      console.log('[AudioRecorder] Stopping MediaRecorder');
       recorderRef.current.stop();
     }
 
     if (streamRef.current) {
+      console.log('[AudioRecorder] Releasing microphone');
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
 
     setIsRecording(false);
     setStatus('Stopped');
+    console.log('[AudioRecorder] ✓ Recording stopped - no more HTTP activity from recorder');
   }, []);
 
   // Auto-start/stop based on live status
@@ -172,6 +199,9 @@ export function AudioRecorder({
   useEffect(() => {
     return () => {
       isRecordingRef.current = false;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
