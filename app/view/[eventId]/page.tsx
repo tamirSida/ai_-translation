@@ -7,15 +7,15 @@ export default function ViewerPage({ params }: { params: Promise<{ eventId: stri
   const { eventId } = use(params);
   const { event, loading: eventLoading } = useEvent(eventId);
   const { chunks, loading: chunksLoading } = useChunks(eventId);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new chunks arrive
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo({
-        top: scrollRef.current.scrollHeight,
-        behavior: 'smooth'
-      });
+    if (bottomRef.current && chunks.length > 0) {
+      // Small delay to ensure DOM is updated
+      setTimeout(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }, 100);
     }
   }, [chunks.length]);
 
@@ -53,10 +53,7 @@ export default function ViewerPage({ params }: { params: Promise<{ eventId: stri
       </header>
 
       {/* Captions Area */}
-      <main
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto p-8"
-      >
+      <main className="flex-1 overflow-y-auto p-8">
         {event.status === 'idle' && chunks.length === 0 && (
           <div className="flex items-center justify-center h-full">
             <p className="text-gray-500 text-2xl">Waiting for event to start...</p>
@@ -86,7 +83,7 @@ export default function ViewerPage({ params }: { params: Promise<{ eventId: stri
               </div>
             ))}
             {/* Scroll anchor */}
-            <div className="h-4" />
+            <div ref={bottomRef} className="h-4" />
           </div>
         )}
 

@@ -60,6 +60,14 @@ export async function POST(request: NextRequest): Promise<NextResponse<ProcessCh
       priorContext
     );
 
+    // Skip saving empty chunks (silence/hallucinations)
+    if (!hebrewText.trim() || !englishText.trim()) {
+      return NextResponse.json({
+        success: true,
+        data: null, // No data saved for empty chunks
+      });
+    }
+
     // Store chunk in Firestore
     const chunkData: TranscriptionChunk = {
       id: `${eventId}_${chunkIndex}`,
